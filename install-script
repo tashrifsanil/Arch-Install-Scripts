@@ -1,0 +1,165 @@
+#!/bin/bash
+
+
+LRED='\033[01;31m'
+GREEN='\033[0;32m'
+LCYAN='\033[1;36m'
+LBLUE='\033[1;34m'
+LPURPLE='\033[0;35m'
+DGRAY='\033[1;30m'
+NC='\033[0m' # No Color
+
+MOUNT_LOCATION=/mnt/
+TIMEZONE=Asia/Dubai
+USER=tashrif
+
+ROOT_FS_TYPE=btrfs
+
+message ()
+{
+    echo
+    echo -e " $LBLUE>>> $LRED $@ $NC"
+}
+
+command ()
+{
+    echo -e "$LCYAN$@$NC"
+    $@
+    if [ $? -ne 0 ]; then
+	echo -e "$LREDFailed$NC"
+	exit 1
+    fi
+}
+
+set_partitions()
+{
+    command lsblk
+    message "Enter the target installation drive (don't include the partition number e.g /dev/sda, /dev/sdb)"
+    read TARGET
+    message "Enter the efi partition /dev/(partition name)"
+    read EFI_PARTITION
+    message "Enter the boot partition /dev/(partition name)"
+    read BOOT_PARTITION
+    message "Enter the swap partition /dev/(partition name)"
+    read SWAP_PARTITION
+    message "Enter the root partition /dev/(partition name)"
+    read ROOT_PARTITION
+}
+
+
+format_partitions()
+{
+    #Disk partitioning
+    message "Formatting EFI partition"
+    command mkfs.vfat $EFI_PARTITION
+    message "Formating Boot Partition"
+    command mkfs.ext2 $BOOT_PARTITION
+    message "Formating Swap Partition"
+    command mkswap -f $SWAP_PARTITION
+    command swapon $SWAP_PARTITION
+    message "Formating Root Partition"
+    command mkfs.${ROOT_FS_TYPE} -f $ROOT_PARTITION
+
+    #Mount Disks
+    message "Mounting Disks"
+    command mount -v $ROOT_PARTITION $MOUNT_LOCATION
+    command mkdir -pv ${MOUNT_LOCATION}/boot
+    command mount -v $BOOT_PARTITION ${MOUNT_LOCATION}/boot
+}
+
+install_base_system()
+{
+    message "Installing base system"
+    command pacstrap -i /mnt base base-devel
+    message "Mounting efi system"
+    command mkdir -pv /mnt/boot/efi
+    command mount -v $EFI_PARTITION /mnt/boot/efi
+    message "Generating fstab"
+    genfstab -p /mnt >> /mnt/etc/fstab
+    command arch-chroot $MOUNT_LOCATION /bin/bash -c "install_arch_chroot"
+}
+
+install_arch_chroot()
+{
+    message "Writing /etc/locale.gen file"
+    cat <<EOF
+ EOF > /etc/locale.gen
+# All blank lines and lines starting with # are ignored.
+#en_US ISO-8859-1
+ en_US.UTF-8 UTF-8
+#ja_JP.EUC-JP EUC-JP
+ja_JP.UTF-8 UTF-8
+#ja_JP EUC-JP
+#en_HK ISO-8859-1
+#en_PH ISO-8859-1
+#de_DE ISO-8859-1
+#de_DE@euro ISO-8859-15
+#es_MX ISO-8859-1
+#fa_IR UTF-8
+#fr_FR ISO-8859-1
+#fr_FR@euro ISO-8859-15
+#it_IT ISO-8859-1
+EOF
+EOF
+
+    command locale-gen
+    command echo LANG=en_US.UTF-8 > /etc/locale.conf
+    command export LANG=en_US.UTF-8
+
+    message "Setting timezone data"
+    command ln -sv /usr/share/zoneinfo/Asia/Dubai /etc/localtime
+    command hwclock --systohc --utc
+
+    message "Installing wireless tools"
+    command pacman -S wireless_tools wpa_supplicant wpa_actiond dialog
+
+    message "Updating system"
+    command pacman -Syuu
+    command useradd -m -g users -G wheel,storage,power -s /bin/bash $USER
+
+    message "Enter password for" $USER
+    command passwd $USER
+
+    message "Generating initial ramdisk"
+    command mkinitcpio -p linux
+
+    message "Installing bootloader"
+    command pacman -S grub efibootmgr
+    command grub-mkconfig -o /boot/grub/grub.cfg
+    command grub-install $TARGET
+}
+
+install()
+{
+    set_partitions
+    format_partitions
+    install_base_system
+}
+
+export -f message
+export -f command
+export -f install_arch_chroot
+export -f format_partitions
+export -f install_base_system
+export -f install
+
+
+export LRED
+export GREEN
+export LCYAN
+export LBLUE
+export LPURPLE
+export DGRAY
+export NC
+
+export EFI_PARTITION
+export BOOT_PARTITION
+export SWAP_PARTITION
+export ROOT_PARTITION
+export ROOT_FS_TYPE
+export MOUNT_LOCATION
+
+export TIMEZONE
+export USER
+
+install
